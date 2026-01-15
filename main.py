@@ -14,6 +14,26 @@ from data.wheelchair_runs import WheelchairRunDataset
 import faiss
 import torchvision.transforms as T
 from PIL import Image
+import csv
+
+
+def log_results(filename, query_idx, ref_idx, inliers, error):
+    file_exists = os.path.isfile(filename)
+    headers = ['query_idx', 'reference_idx', 'inliers', 'error']
+    
+    with open(filename, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        
+        # Write header only if creating a new file
+        if not file_exists:
+            writer.writeheader()
+            
+        writer.writerow({
+            'query_idx': query_idx,
+            'reference_idx': ref_idx,
+            'inliers': inliers,
+            'error': f"{error:.6f}",
+        })
 
 class Relocalizer:
     def __init__(self, db_root, moge_path, mapping_data_path):
@@ -124,7 +144,7 @@ class Relocalizer:
         # print(z_ref[:10])   
 
         # Filter out invalid depth points
-        valid = z_ref > 0.1
+        valid = z_ref > 0
         kpts_q, kpts_ref, z_ref = kpts_q[valid], kpts_ref[valid], z_ref[valid]
 
         # Back-project ref pixels to Ref Camera Space
@@ -170,6 +190,7 @@ if __name__ == "__main__":
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     QUERY_DATA_PATH = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-2-wheelchair-query"
     mapping_data_path = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-1-wheelchair-mapping"
+    log_file = "../../../../../scratch/dynrecon/results/retrieval_log.csv"
 
     # 1. Init
     reloc = Relocalizer(DB_ROOT, MOGE_PATH, mapping_data_path)
@@ -245,7 +266,7 @@ if __name__ == "__main__":
             else:
                 print(f"Frame {i}: Localization FAILED")
                 # Clear the pred_camera from the view if it failed
-                # rr.log("world/pred_camera", rr.Clear(recursive=True))
+                rr.log("world/pred_camera", rr.Clear(recursive=True))
                 # break  # stop on first failure
 
 
@@ -255,6 +276,15 @@ if __name__ == "__main__":
                 # error = np.linalg.norm(pred_pose[:3, 3] - gt_pose[:3, 3])
                 # print(f"Translation Error: {error:.4f} meters")
                 # print(f"Number of Inliers: {inlier_count}\n")
+
+            # Log results to CSV
+            log_results(
+                    log_file, 
+                    query_idx=i,
+                    ref_idx=ref_idx, 
+                    inliers=inlier_count, 
+                    error=error if pred_pose is not None else -1.0, 
+    )
 
     try:
         while True:
