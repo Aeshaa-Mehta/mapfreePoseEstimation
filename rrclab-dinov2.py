@@ -15,6 +15,8 @@ import faiss
 import torchvision.transforms as T
 from PIL import Image
 import csv
+from utils import pose_error, r_error, t_error
+from scipy.spatial.transform import Rotation as SciR
 
 
 def log_results(filename, query_idx, ref_idx, inliers, error):
@@ -36,9 +38,8 @@ def log_results(filename, query_idx, ref_idx, inliers, error):
         })
 
 class Relocalizer:
-    def __init__(self, db_root, moge_path, mapping_data_path):
+    def __init__(self, moge_path, mapping_data_path):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.db_root = Path(db_root)
         
         # 1. Load Database
         print("Loading Database...")
@@ -48,6 +49,10 @@ class Relocalizer:
 
         print("Loading Mapping Dataset for GT lookup...")
         self.mapping_dataset = WheelchairRunDataset(mapping_data_path)
+
+        self.ref_poses = []
+        for i in range(len(self.mapping_dataset)):
+            self.ref_poses.append(self.mapping_dataset[i]["pose"].cpu().numpy())
 
         # 2. Load Retrieval Model (DINOv2)
         print("Loading DINOv2-vits14 ...")
@@ -184,16 +189,16 @@ class Relocalizer:
         return best_overall_pose, max_inlier_count, ref_idx, ref_path
            
 if __name__ == "__main__":
-    # --- CONFIG ---
-    DB_ROOT = "../../../../../scratch/dynrecon/wheelchair_reloc_db_dinov2"
+    EXPERIMENT_NAME = "run-2-dinov2-roma"
     MOGE_PATH = "../../../../../scratch/dynrecon/checkpoints/moge-vits.pt"
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     QUERY_DATA_PATH = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-2-wheelchair-query"
     mapping_data_path = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-1-wheelchair-mapping"
-    log_file = "../../../../../scratch/dynrecon/results/retrieval_log.csv"
+    pred_tum_path = f"../../../../../scratch/dynrecon/exps/pred_trajectory_tum/{EXPERIMENT_NAME}.txt"
+    retrieved_tum_path = f"../../../../../scratch/dynrecon/exps/retrieved_trajectory_tum/{EXPERIMENT_NAME}.txt"
 
     # 1. Init
-    reloc = Relocalizer(DB_ROOT, MOGE_PATH, mapping_data_path)
+    reloc = Relocalizer(MOGE_PATH, mapping_data_path)
 
     # 2. Load a Query Image from the dataset
     # an example picking frame 10 from the test run
@@ -210,81 +215,104 @@ if __name__ == "__main__":
     gt_path_history = []
     pred_path_history = []
 
-    with torch.no_grad():
-        for i,batch in enumerate(query_loader):
+    with open(pred_tum_path, "w") as pred_f, open(retrieved_tum_path, "w") as retrieved_f:
+        with torch.no_grad():
+            for i,batch in enumerate(query_loader):
 
-            # Set the timeline
-            rr.set_time("frame_idx", sequence = i)
-            query_img = batch["rgb"]  # [1, 3, H, W]
-            query_K = batch["K"].numpy()[0]
-            gt_pose = batch["pose"].numpy()[0]
-            gt_path_history.append(gt_pose[:3, 3])
-            query_img_path = os.path.join(query_dataset.rgb_dir, query_dataset.rgb_files[i])
-            pred_pose, inlier_count, ref_idx, ref_path = reloc.relocalize(query_img_path, query_K)
+                # Set the timeline
+                rr.set_time("frame_idx", sequence = i)
+                query_img = batch["rgb"]  # [1, 3, H, W]
+                query_K = batch["K"].numpy()[0]
+                gt_pose = batch["pose"].numpy()[0]
+                gt_path_history.append(gt_pose[:3, 3])
+                query_img_path = os.path.join(query_dataset.rgb_dir, query_dataset.rgb_files[i])
+                pred_pose, inlier_count, ref_idx, ref_path = reloc.relocalize(query_img_path, query_K)
 
-            #log gt (green)
-            rr.log(
-                "world/gt_camera",
-                rr.Transform3D(
-                    translation=gt_pose[:3, 3],
-                    mat3x3=gt_pose[:3, :3],
-                    relation=rr.TransformRelation.ChildFromParent
-                )
-            )
-            rr.log("world/gt_path", rr.LineStrips3D([gt_path_history], colors=[0, 255, 0], radii=0.02))
+                #exp pose logging
+                if ref_idx != -1:
+                    T_ref_world = reloc.ref_poses[ref_idx]
+                    t_ref = T_ref_world[:3, 3]
+                    q_ref = SciR.from_matrix(T_ref_world[:3, :3]).as_quat() # [qx, qy, qz, qw]
 
-            # Log the image to the GT camera frustum
-            query_img_np = (batch["rgb"][0].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
-            # rr.log("world/gt_camera", rr.Image(query_img_np))
+                    retrieved_line = (
+                        f"{float(i):.9f} {t_ref[0]:.9f} {t_ref[1]:.9f} {t_ref[2]:.9f} "
+                        f"{q_ref[0]:.9f} {q_ref[1]:.9f} {q_ref[2]:.9f} {q_ref[3]:.9f}\n"
+                    )
+                    retrieved_f.write(retrieved_line)
 
+                    if pred_pose is not None:
+                        t_pred = pred_pose[:3, 3]
+                        q_pred = SciR.from_matrix(pred_pose[:3, :3]).as_quat()
 
+                        pred_line = (
+                            f"{float(i):.9f} {t_pred[0]:.9f} {t_pred[1]:.9f} {t_pred[2]:.9f} "
+                            f"{q_pred[0]:.9f} {q_pred[1]:.9f} {q_pred[2]:.9f} {q_pred[3]:.9f}\n"
+                        )
+                        pred_f.write(pred_line)
 
-            if pred_pose is not None:
-                # predicted (Red)
+                #log gt (green)
                 rr.log(
-                    "world/pred_camera",
+                    "world/gt_camera",
                     rr.Transform3D(
-                        translation=pred_pose[:3, 3],
-                        mat3x3=pred_pose[:3, :3],
+                        translation=gt_pose[:3, 3],
+                        mat3x3=gt_pose[:3, :3],
                         relation=rr.TransformRelation.ChildFromParent
                     )
                 )
-                pred_path_history.append(pred_pose[:3, 3])
-                rr.log("world/pred_path", rr.LineStrips3D([pred_path_history], colors=[255, 0, 0], radii=0.03))                
-                error = np.linalg.norm(pred_pose[:3, 3] - gt_pose[:3, 3])
+                rr.log("world/gt_path", rr.LineStrips3D([gt_path_history], colors=[0, 255, 0], radii=0.02))
 
-                print(f"Frame {i}: Error {error:.4f}m | Inliers: {inlier_count}")
-
-                rr.log("debug/images/query", rr.Image(query_img_np))
-                ref_img_cv2 = cv2.imread(ref_path)
-                ref_img_rgb = cv2.cvtColor(ref_img_cv2, cv2.COLOR_BGR2RGB)
-                rr.log("debug/images/retrieved", rr.Image(ref_img_rgb))
-                # rr.log("debug/ref_idx", rr.Scalars(ref_idx))
-                rr.log("debug/inliers", rr.Scalars(inlier_count))
-                # rr.log("debug/translation_error", rr.Scalars(error))
-
-            else:
-                print(f"Frame {i}: Localization FAILED")
-                # Clear the pred_camera from the view if it failed
-                rr.log("world/pred_camera", rr.Clear(recursive=True))
-                # break  # stop on first failure
+                # Log the image to the GT camera frustum
+                query_img_np = (batch["rgb"][0].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+                # rr.log("world/gt_camera", rr.Image(query_img_np))
 
 
-                # print("\n--- RESULTS ---")
-                # print("Predicted Position:", pred_pose[:3, 3])
-                # print("GT Position:       ", gt_pose[:3, 3])
-                # error = np.linalg.norm(pred_pose[:3, 3] - gt_pose[:3, 3])
-                # print(f"Translation Error: {error:.4f} meters")
-                # print(f"Number of Inliers: {inlier_count}\n")
 
-            # Log results to CSV
-            log_results(
-                    log_file, 
-                    query_idx=i,
-                    ref_idx=ref_idx, 
-                    inliers=inlier_count, 
-                    error=error if pred_pose is not None else -1.0, 
-    )
+                if pred_pose is not None:
+                    # predicted (Red)
+                    rr.log(
+                        "world/pred_camera",
+                        rr.Transform3D(
+                            translation=pred_pose[:3, 3],
+                            mat3x3=pred_pose[:3, :3],
+                            relation=rr.TransformRelation.ChildFromParent
+                        )
+                    )
+                    pred_path_history.append(pred_pose[:3, 3])
+                    rr.log("world/pred_path", rr.LineStrips3D([pred_path_history], colors=[255, 0, 0], radii=0.03))                
+                    error = np.linalg.norm(pred_pose[:3, 3] - gt_pose[:3, 3])
+
+                    print(f"Frame {i}: Error {error:.4f}m | Inliers: {inlier_count}")
+
+                    rr.log("debug/images/query", rr.Image(query_img_np))
+                    ref_img_cv2 = cv2.imread(ref_path)
+                    ref_img_rgb = cv2.cvtColor(ref_img_cv2, cv2.COLOR_BGR2RGB)
+                    rr.log("debug/images/retrieved", rr.Image(ref_img_rgb))
+                    # rr.log("debug/ref_idx", rr.Scalars(ref_idx))
+                    rr.log("debug/inliers", rr.Scalars(inlier_count))
+                    # rr.log("debug/translation_error", rr.Scalars(error))
+
+                else:
+                    print(f"Frame {i}: Localization FAILED")
+                    # Clear the pred_camera from the view if it failed
+                    rr.log("world/pred_camera", rr.Clear(recursive=True))
+                    # break  # stop on first failure
+
+
+                    # print("\n--- RESULTS ---")
+                    # print("Predicted Position:", pred_pose[:3, 3])
+                    # print("GT Position:       ", gt_pose[:3, 3])
+                    # error = np.linalg.norm(pred_pose[:3, 3] - gt_pose[:3, 3])
+                    # print(f"Translation Error: {error:.4f} meters")
+                    # print(f"Number of Inliers: {inlier_count}\n")
+
+                # Log results to CSV
+                # log_results(
+                #         log_file, 
+                #         query_idx=i,
+                #         ref_idx=ref_idx, 
+                #         inliers=inlier_count, 
+                #         error=error if pred_pose is not None else -1.0, 
+        # )
 
     try:
         while True:

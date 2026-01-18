@@ -57,7 +57,7 @@ def vis_matches(q_idx, ref_idx, num_vis=50):
 
     # 5. Log to Rerun
     canvas_rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
-    rr.log("debug/matches", rr.Image(canvas_rgb))
+    rr.log("debuophg/matches", rr.Image(canvas_rgb))
     
     print(f"Done")
 

@@ -49,7 +49,7 @@ class WheelchairRunDataset(Dataset):
                 vals = list(map(float, line.split()))
                 _, tx, ty, tz, qx, qy, qz, qw = vals
 
-                # Scipy uses [x, y, z, w] order by default, matching your README
+                # Scipy uses [x, y, z, w] order by default
                 R = SciR.from_quat([qx, qy, qz, qw]).as_matrix()
 
                 T = np.eye(4)
