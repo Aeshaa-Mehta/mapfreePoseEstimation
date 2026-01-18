@@ -150,11 +150,11 @@ class Relocalizer:
            
 if __name__ == "__main__":
     EXPERIMENT_NAME = "run-2-oracle-roma"
-    MOGE_PATH = "../../../../../scratch/dynrecon/checkpoints/moge-vits.pt"
-    QUERY_DATA_PATH = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-2-wheelchair-query"
-    MAPPING_DATA_PATH = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-1-wheelchair-mapping"
-    pred_tum_path = f"../../../../../scratch/dynrecon/exps/pred_trajectory_tum/{EXPERIMENT_NAME}.txt"
-    retrieved_tum_path = f"../../../../../scratch/dynrecon/exps/retrieved_trajectory_tum/{EXPERIMENT_NAME}.txt"
+    MOGE_PATH = "../../../../../../scratch/dynrecon/checkpoints/moge-vits.pt"
+    QUERY_DATA_PATH = "../../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-2-wheelchair-query"
+    MAPPING_DATA_PATH = "../../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-1-wheelchair-mapping"
+    pred_tum_path = f"../../../../../../scratch/dynrecon/exps/pred_trajectory_tum/{EXPERIMENT_NAME}.txt"
+    retrieved_tum_path = f"../../../../../../scratch/dynrecon/exps/retrieved_trajectory_tum/{EXPERIMENT_NAME}.txt"
 
     # 1. Init
     reloc = Relocalizer(MOGE_PATH, MAPPING_DATA_PATH)

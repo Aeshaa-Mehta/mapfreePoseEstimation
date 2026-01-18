@@ -43,8 +43,8 @@ class Relocalizer:
         
         # 1. Load Database
         print("Loading Database...")
-        self.index = faiss.read_index("data.bin")
-        with open("file_database.json", "r") as f:
+        self.index = faiss.read_index("./data/data.bin")
+        with open("./data/file_database.json", "r") as f:
             self.metadata = json.load(f)
 
         print("Loading Mapping Dataset for GT lookup...")
@@ -102,7 +102,7 @@ class Relocalizer:
         similarities, indices = self. index.search(q_emb.astype('float32'), 1)
         
         best_overall_pose = None
-        max_inlier_count = 0
+        max_inlier_count = 50
         
         # print(f"-> Testing Top 5 Candidates...")
         # sims = torch.matmul(q_desc, self.ref_descriptors.T)
@@ -166,7 +166,7 @@ class Relocalizer:
             pts_world.astype(np.float32), 
             kpts_q.astype(np.float32), 
             query_K.astype(np.float32), 
-            distCoeffs=None, iterationsCount=1500, reprojectionError=1.0, flags=cv2.SOLVEPNP_SQPNP
+            distCoeffs=None, iterationsCount=1500, reprojectionError=3.0, flags=cv2.SOLVEPNP_SQPNP
         )
 
         inlier_count = len(inliers) if inliers is not None else 0
@@ -190,18 +190,16 @@ class Relocalizer:
            
 if __name__ == "__main__":
     EXPERIMENT_NAME = "run-2-dinov2-roma"
-    MOGE_PATH = "../../../../../scratch/dynrecon/checkpoints/moge-vits.pt"
+    MOGE_PATH = "../../../../../../scratch/dynrecon/checkpoints/moge-vits.pt"
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    QUERY_DATA_PATH = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-2-wheelchair-query"
-    mapping_data_path = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-1-wheelchair-mapping"
-    pred_tum_path = f"../../../../../scratch/dynrecon/exps/pred_trajectory_tum/{EXPERIMENT_NAME}.txt"
-    retrieved_tum_path = f"../../../../../scratch/dynrecon/exps/retrieved_trajectory_tum/{EXPERIMENT_NAME}.txt"
-
+    QUERY_DATA_PATH = "../../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-2-wheelchair-query"
+    mapping_data_path = "../../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-1-wheelchair-mapping"
+    pred_tum_path = f"../../../../../../scratch/dynrecon/exps/pred_trajectory_tum/{EXPERIMENT_NAME}.txt"
+    retrieved_tum_path = f"../../../../../../scratch/dynrecon/exps/retrieved_trajectory_tum/{EXPERIMENT_NAME}.txt"
     # 1. Init
     reloc = Relocalizer(MOGE_PATH, mapping_data_path)
 
     # 2. Load a Query Image from the dataset
-    # an example picking frame 10 from the test run
     query_dataset = WheelchairRunDataset(QUERY_DATA_PATH)
     query_loader = DataLoader(query_dataset, batch_size=1, shuffle=False)
     
@@ -209,7 +207,7 @@ if __name__ == "__main__":
     rr.init("Wheelchair_Mapping", spawn=False)
     rr.connect_grpc()  
 
-    # Set the world coordinate system to Z-up (standard for this dataset)
+    # Set the world coordinate system to Z-up 
     rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
     # Lists to store the full history for drawing paths
     gt_path_history = []
