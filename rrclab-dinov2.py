@@ -6,7 +6,7 @@ from pathlib import Path
 from transformers import AutoImageProcessor, AutoModel
 import os
 import time
-from torch.utils.data import DataLoader
+from torch.metrics.data import DataLoader
 import rerun as rr
 from moge.model.v2 import MoGeModel
 from romav2 import RoMaV2 
@@ -102,7 +102,7 @@ class Relocalizer:
         similarities, indices = self. index.search(q_emb.astype('float32'), 1)
         
         best_overall_pose = None
-        max_inlier_count = 50
+        max_inlier_count = 100
         
         # print(f"-> Testing Top 5 Candidates...")
         # sims = torch.matmul(q_desc, self.ref_descriptors.T)
@@ -157,7 +157,7 @@ class Relocalizer:
         y_c = (kpts_ref[:, 1] - K_ref[1, 2]) * z_ref / K_ref[1, 1]
         pts_ref_cam = np.stack([x_c, y_c, z_ref, np.ones_like(z_ref)], axis=-1)
 
-        # Transform to World Space using Reference GT Pose
+        # to 3d
         pts_world = (T_ref_world @ pts_ref_cam.T).T[:, :3]
 
         # -- 5. Pose Estimation (PnP) --
@@ -166,36 +166,54 @@ class Relocalizer:
             pts_world.astype(np.float32), 
             kpts_q.astype(np.float32), 
             query_K.astype(np.float32), 
-            distCoeffs=None, iterationsCount=1500, reprojectionError=3.0, flags=cv2.SOLVEPNP_SQPNP
+            distCoeffs=None, iterationsCount=1000, reprojectionError=1.5, flags=cv2.SOLVEPNP_SQPNP
         )
 
-        inlier_count = len(inliers) if inliers is not None else 0
-        # print(f"   Rank {rank+1}: Frame {ref_idx} | Inliers: {inlier_count} | Sim: {top_scores[rank]:.3f}")
+        #pose refinement
+        if success and len(inliers) >= 6:
+            if success and inliers is not None and len(inliers) >= 6:
+                idx = inliers.flatten()
+                inlier_pts_world = pts_world[idx].astype(np.float32)
+                inlier_kpts_q = kpts_q[idx].astype(np.float32)
 
-        if inlier_count > max_inlier_count:
-            max_inlier_count = inlier_count
+                success, rvec, tvec = cv2.solvePnP(
+                inlier_pts_world,
+                inlier_kpts_q,
+                query_K.astype(np.float32),
+                distCoeffs=None,
+                rvec=rvec,
+                tvec=tvec,
+                useExtrinsicGuess=True,
+                flags=cv2.SOLVEPNP_ITERATIVE
+            )
+
+        if success:
+            if np.linalg.norm(tvec) > 1000:
+                success = False
+
+        inlier_count = len(inliers) if inliers is not None else 0
+
+        if success and inlier_count > max_inlier_count:
             R_qw, _ = cv2.Rodrigues(rvec)
             T_qw = np.eye(4)
             T_qw[:3, :3] = R_qw
             T_qw[:3, 3] = tvec.flatten()
-            T_wq = np.linalg.inv(T_qw)
             best_overall_pose = np.linalg.inv(T_qw)
-
         else:
-            max_inlier_count = 0
             best_overall_pose = None
 
-
-        return best_overall_pose, max_inlier_count, ref_idx, ref_path
+        return best_overall_pose, inlier_count, ref_idx, ref_path
            
 if __name__ == "__main__":
     EXPERIMENT_NAME = "run-2-dinov2-roma"
-    MOGE_PATH = "../../../../../../scratch/dynrecon/checkpoints/moge-vits.pt"
+    MOGE_PATH = "../../../../../scratch/dynrecon/checkpoints/moge-vits.pt"
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    QUERY_DATA_PATH = "../../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-2-wheelchair-query"
-    mapping_data_path = "../../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-1-wheelchair-mapping"
-    pred_tum_path = f"../../../../../../scratch/dynrecon/exps/pred_trajectory_tum/{EXPERIMENT_NAME}.txt"
-    retrieved_tum_path = f"../../../../../../scratch/dynrecon/exps/retrieved_trajectory_tum/{EXPERIMENT_NAME}.txt"
+    QUERY_DATA_PATH = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-2-wheelchair-query"
+    mapping_data_path = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-1-wheelchair-mapping"
+    pred_tum_path = f"../../../../../scratch/dynrecon/exps/pred_trajectory_tum/{EXPERIMENT_NAME}.txt"
+    retrieved_tum_path = f"../../../../../scratch/dynrecon/exps/retrieved_trajectory_tum/{EXPERIMENT_NAME}.txt"
+    log_file = f"../../../../../scratch/dynrecon/results/{EXPERIMENT_NAME}_results.csv"
+
     # 1. Init
     reloc = Relocalizer(MOGE_PATH, mapping_data_path)
 
@@ -304,13 +322,13 @@ if __name__ == "__main__":
                     # print(f"Number of Inliers: {inlier_count}\n")
 
                 # Log results to CSV
-                # log_results(
-                #         log_file, 
-                #         query_idx=i,
-                #         ref_idx=ref_idx, 
-                #         inliers=inlier_count, 
-                #         error=error if pred_pose is not None else -1.0, 
-        # )
+                log_results(
+                        log_file, 
+                        query_idx=i,
+                        ref_idx=ref_idx, 
+                        inliers=inlier_count, 
+                        error=error if pred_pose is not None else -1.0, 
+        )
 
     try:
         while True:

@@ -11,7 +11,7 @@ from moge.model.v2 import MoGeModel
 from romav2 import RoMaV2 
 from data.wheelchair_runs import WheelchairRunDataset
 from PIL import Image
-from utils import r_error, t_error
+from metrics import r_error, t_error
 from scipy.spatial.transform import Rotation as SciR
 
 
@@ -138,24 +138,48 @@ class Relocalizer:
             distCoeffs=None, iterationsCount=1500, reprojectionError=1.5, flags=cv2.SOLVEPNP_SQPNP
         )
 
+        #pose refinement
+        if success and len(inliers) >= 6:
+            if success and inliers is not None and len(inliers) >= 6:
+                idx = inliers.flatten()
+                inlier_pts_world = pts_world[idx].astype(np.float32)
+                inlier_kpts_q = kpts_q[idx].astype(np.float32)
+
+                success, rvec, tvec = cv2.solvePnP(
+                inlier_pts_world,
+                inlier_kpts_q,
+                query_K.astype(np.float32),
+                distCoeffs=None,
+                rvec=rvec,
+                tvec=tvec,
+                useExtrinsicGuess=True,
+                flags=cv2.SOLVEPNP_ITERATIVE
+            )
+
         if success:
+            if np.linalg.norm(tvec) > 1000:
+                success = False
+
+        inlier_count = len(inliers) if inliers is not None else 0
+
+        if success: #and inlier_count > max_inlier_count:
             R_qw, _ = cv2.Rodrigues(rvec)
             T_qw = np.eye(4)
             T_qw[:3, :3] = R_qw
             T_qw[:3, 3] = tvec.flatten()
             best_overall_pose = np.linalg.inv(T_qw)
-            return best_overall_pose, len(inliers), ref_idx, ref_path
         else:
-            return None, 0, ref_idx, ref_path
+            best_overall_pose = None
+
+        return best_overall_pose, inlier_count, ref_idx, ref_path
            
 if __name__ == "__main__":
     EXPERIMENT_NAME = "run-2-oracle-roma"
-    MOGE_PATH = "../../../../../../scratch/dynrecon/checkpoints/moge-vits.pt"
-    QUERY_DATA_PATH = "../../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-2-wheelchair-query"
-    MAPPING_DATA_PATH = "../../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-1-wheelchair-mapping"
-    pred_tum_path = f"../../../../../../scratch/dynrecon/exps/pred_trajectory_tum/{EXPERIMENT_NAME}.txt"
-    retrieved_tum_path = f"../../../../../../scratch/dynrecon/exps/retrieved_trajectory_tum/{EXPERIMENT_NAME}.txt"
-
+    MOGE_PATH = "../../../../../scratch/dynrecon/checkpoints/moge-vits.pt"
+    QUERY_DATA_PATH = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-2-wheelchair-query"
+    MAPPING_DATA_PATH = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-1-wheelchair-mapping"
+    pred_tum_path = f"../../../../../scratch/dynrecon/exps/pred_trajectory_tum/{EXPERIMENT_NAME}.txt"
+    retrieved_tum_path = f"../../../../../scratch/dynrecon/exps/retrieved_trajectory_tum/{EXPERIMENT_NAME}.txt"
     # 1. Init
     reloc = Relocalizer(MOGE_PATH, MAPPING_DATA_PATH)
 
