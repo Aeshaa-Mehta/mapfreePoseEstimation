@@ -6,7 +6,7 @@ from pathlib import Path
 from transformers import AutoImageProcessor, AutoModel
 import os
 import time
-from torch.metrics.data import DataLoader
+from torch.utils.data import DataLoader
 import rerun as rr
 from moge.model.v2 import MoGeModel
 from romav2 import RoMaV2 
@@ -15,7 +15,7 @@ import faiss
 import torchvision.transforms as T
 from PIL import Image
 import csv
-from utils import pose_error, r_error, t_error
+from metrics import pose_error, r_error, t_error
 from scipy.spatial.transform import Rotation as SciR
 
 
