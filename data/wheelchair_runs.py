@@ -95,5 +95,4 @@ class WheelchairRunDataset(Dataset):
             "idx": idx
         }
 
-# data_path = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-1-wheelchair-mapping"
 

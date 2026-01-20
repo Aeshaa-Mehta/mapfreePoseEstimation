@@ -183,8 +183,8 @@ def create_index():
             file_database.append(file_path)
 
     # SAVE BOTH TOGETHER
-    faiss.write_index(index, "data.bin")
-    with open("file_database.json", "w") as f:
+    faiss.write_index(index, "torwic_data.bin")
+    with open("torwic_dataset.json", "w") as f:
         json.dump(file_database, f)
     
     print("Database created and saved.")

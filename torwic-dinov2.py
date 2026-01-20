@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import rerun as rr
 from moge.model.v2 import MoGeModel
 from romav2 import RoMaV2 
-from data.wheelchair_runs import WheelchairRunDataset
+from data.torwik_runs import TorWICDataset
 import faiss
 import torchvision.transforms as T
 from PIL import Image
@@ -43,12 +43,12 @@ class Relocalizer:
         
         # 1. Load Database
         print("Loading Database...")
-        self.index = faiss.read_index("./data/rrclab_data.bin")
-        with open("./data/rrclab_dataset.json", "r") as f:
+        self.index = faiss.read_index("./data/data.bin")
+        with open("./data/file_database.json", "r") as f:
             self.metadata = json.load(f)
 
         print("Loading Mapping Dataset for GT lookup...")
-        self.mapping_dataset = WheelchairRunDataset(mapping_data_path)
+        self.mapping_dataset = TorWICDataset(mapping_data_path, resize=(512, 288))
 
         self.ref_poses = []
         for i in range(len(self.mapping_dataset)):
@@ -205,11 +205,17 @@ class Relocalizer:
         return best_overall_pose, inlier_count, ref_idx, ref_path
            
 if __name__ == "__main__":
-    EXPERIMENT_NAME = "run-2-dinov2-roma"
+
+    REF_DAY = "Jun15"
+    REF_RUN = "Aisle_CCW_Run_1"
+    QUERY_DAY = "Jun23"
+    QUERY_RUN = "Aisle_CW_Run_2"
+    EXPERIMENT_NAME = f"-{REF_RUN.replace('_', '').lower()}-query-{QUERY_DAY.lower()}-{QUERY_RUN.replace('_', '').lower()}-dinov2-roma"
     MOGE_PATH = "../../../../../scratch/dynrecon/checkpoints/moge-vits.pt"
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    QUERY_DATA_PATH = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-2-wheelchair-query"
-    mapping_data_path = "../../../../../scratch/toponavgroup/indoor-topo-loc/datasets/rrc-lab-data/wheelchair-runs-20241220/run-1-wheelchair-mapping"
+    DATA_ROOT = "../../../../../scratch/rohit.jayanti/indoor-topo-loc/datasets/TorWIC-SLAM"
+    QUERY_DATA_PATH = os.path.join(DATA_ROOT, f"{QUERY_DAY}/{QUERY_RUN}")
+    mapping_data_path = os.path.join(DATA_ROOT, f"{REF_DAY}/{REF_RUN}")
     pred_tum_path = f"../../../../../scratch/dynrecon/exps/pred_trajectory_tum/{EXPERIMENT_NAME}.txt"
     retrieved_tum_path = f"../../../../../scratch/dynrecon/exps/retrieved_trajectory_tum/{EXPERIMENT_NAME}.txt"
     log_file = f"../../../../../scratch/dynrecon/results/{EXPERIMENT_NAME}_results.csv"
@@ -218,7 +224,7 @@ if __name__ == "__main__":
     reloc = Relocalizer(MOGE_PATH, mapping_data_path)
 
     # 2. Load a Query Image from the dataset
-    query_dataset = WheelchairRunDataset(QUERY_DATA_PATH)
+    query_dataset = TorWICDataset(QUERY_DATA_PATH, resize=(512, 288))
     query_loader = DataLoader(query_dataset, batch_size=1, shuffle=False)
     
     #initialize Rerun
@@ -337,52 +343,3 @@ if __name__ == "__main__":
         print("Disconnecting...")
         rr.disconnect()  # Disconnect gracefully on script termination
             
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    ############  TESTING A SINGLE QUERY IMAGE  ###########
-    # sample = test_dataset[13]
-    
-    # query_img_path = os.path.join(test_dataset.rgb_dir, test_dataset.rgb_files[13])
-    # query_K = sample["K"].numpy()
-    # gt_pose = sample["pose"].numpy()
-
-    # # test_row = "500" 
-    # # query_img_path = reloc.metadata[test_row]["image_path"]
-    # # query_K = np.array(reloc.metadata[test_row]["K"])
-    # # gt_pose = np.array(reloc.metadata[test_row]["pose"])
-
-    # # print("\n--- SELF-MATCH TEST (Frame 500) ---")
-    # # 3. Run Relocalization
-    # pred_pose, inlier_count = reloc.relocalize(query_img_path, query_K)
-
-    # if pred_pose is not None:
-    #     print("\n--- RESULTS ---")
-    #     print("Predicted Position:", pred_pose[:3, 3])
-    #     print("GT Position:       ", gt_pose[:3, 3])
-    #     error = np.linalg.norm(pred_pose[:3, 3] - gt_pose[:3, 3])
-    #     print(f"Translation Error: {error:.4f} meters")
-    #     # print(f"Reference Frame Position (in Map World): {ref_pos_in_mapping_world}")
-    #     # print(f"Distance between Query and Ref: {np.linalg.norm(pred_pose[:3, 3] - ref_pos_in_mapping_world):.4f} meters")
-    #     print(f"Number of Inliers: {inlier_count}")
